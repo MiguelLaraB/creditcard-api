@@ -1,0 +1,55 @@
+name: Modelops deploy
+on:
+ push:
+  branches: [master]
+ pull_request:
+  branches: [master]
+ repository_dispatch:
+  types: [ml_ci_cd]
+jobs:
+ ml_ci_cd:
+  runs-on: ubuntu-latest
+  steps:
+  - uses: actions/checkout@v2
+  - name: python version
+    run: python --version
+  - name: pip install
+    run: pip install -r requirements.txt
+  - name: download dataset
+    run: wget -O data/creditcard_2023.csv ${{github.event.client_payload.dataseturl}}
+  - name: cat dataset
+    run: cat data/creditcard_2023.csv
+  - name: train model
+    run: python model/train.py
+  - name: Debugging step
+    run: echo "DOCKER_USER=${{secrets.DOCKER_USER}} MODEL_NAME=${{secrets.MODEL_NAME}} SHA=${{github.event.client_payload.sha}}"
+  - name: docker build
+    if: ${{ github.event.client_payload.sha != '' }}
+    run: docker build -t ${{secrets.DOCKER_USER}}/${{secrets.MODEL_NAME}}:${{github.event.client_payload.sha}} .
+
+  - name: docker build with modelname
+    if: ${{ github.event.client_payload.sha == '' }}
+    run: docker build -t ${{secrets.DOCKER_USER}}/${{secrets.MODEL_NAME}}:latest .
+
+  - name: docker login
+    env:
+      DOCKER_USER: ${{secrets.DOCKER_USER}}
+      DOCKER_PASSWORD: ${{secrets.DOCKER_PASSWORD}}
+    run: |
+      docker login -u $DOCKER_USER -p $DOCKER_PASSWORD 
+  - name: docker Push
+    if: ${{ github.event.client_payload.sha != '' }}
+    run: docker push ${{secrets.DOCKER_USER}}/${{secrets.MODEL_NAME}}:${{github.event.client_payload.sha}}
+
+  - name: docker Push with latest
+    if: ${{ github.event.client_payload.sha == '' }}
+    run: docker push ${{secrets.DOCKER_USER}}/${{secrets.MODEL_NAME}}:latest
+
+  - name: Notify Render
+    if: ${{ github.event.client_payload.sha != '' }}
+    run: |
+        curl -X POST "https://api.render.com/deploy/srv-cscrv2jv2p9s73fmmq40?key=WuAzqzgVd_4" \
+        -H "Content-Type: application/json"
+        
+  - name: show images
+    run: docker images
